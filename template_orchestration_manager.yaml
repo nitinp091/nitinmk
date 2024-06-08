@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create Orchestration manager
+
+Parameters:
+  TenantName:
+    Type: String
+  ApplicationName:
+    Type: String
+  AppRemoName:
+    Type: String
+  AppPipelineName:
+    Type: String
+  ModelLifeCycle:
+    Type: String
+    AllowedValues: 
+      - Dev
+      - Test
+      - Prod
+  CrossAccountRoleArn:
+    Type: String
+
+Resources:
+  OrchestrationManagerSFNLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Sub "/aws/vendedlogs/states/${TenantName}${ApplicationName}OrchestrationManager"
+
+  OrchestrationManagerSFN:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub ${TenantName}${ApplicationName}OrchestrationManager
+      DefinitionSubstitutions:
+        CodeCommitRepository: !Ref AppRemoName
+        ApplicationPipeline: !Ref AppPipelineName
+      DefinitionString: |-
+        {
+          "StartAt": "Put Parameter",
+          "States": {
+            "Put Parameter": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+              "Parameters": {
+                "DataType": "text",
+                "Name.$": "States.Format('/Shared/SAM/S3/Uri/${CodeCommitRepository}-{}', $.detail.Model.ModelPackageGroupName)",
+                "Overwrite": true,
+                "Value.$": "$.detail.Model.ModelDataURL",
+                "Type": "String"
+              },
+              "InputPath": "$",
+              "ResultPath": null,
+              "OutputPath": "$",
+              "Next": "Get Parameters"
+            },
+            "Get Parameters": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:getParameters",
+              "Parameters": {
+                "Names": [
+                  "/Shared/SAM/S3/Uri/${CodeCommitRepository}-key-value-extraction",
+                  "/Shared/SAM/S3/Uri/${CodeCommitRepository}-document-page-classification"
+                ]
+              },
+              "InputPath": "$",
+              "ResultPath": "$.StateResponse.GetParameters",
+              "OutputPath": "$",
+              "Next": "Confirm required Parameters"
+            },
+            "Confirm required Parameters": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "IsPresent": false,
+                  "Variable": "$.StateResponse.GetParameters.InvalidParameters[0]",
+                  "Next": "Invoke CodePipeline"
+                }
+              ],
+              "Default": "Few Parameters unavailable"
+            },
+            "Invoke CodePipeline": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:codepipeline:startPipelineExecution",
+              "Parameters": {
+                "Name": "${ApplicationPipeline}"
+              },
+              "InputPath": "$",
+              "ResultPath": "$.StateResponse.InvokeCodePipeline",
+              "OutputPath": "$",
+              "End": true
+            },
+            "Few Parameters unavailable": {
+              "Type": "Pass",
+              "Result": {
+                "Cause": "Few required SSM parameter are not available"
+              },
+              "InputPath": "$",
+              "ResultPath": "$.ErrorInfo",
+              "OutputPath": "$",
+              "Next": "Invocation Skipped"
+            },
+            "Invocation Skipped": {
+              "Type": "Pass",
+              "Parameters": {
+                "Status": "FAILED",
+                "StatusNarrative.$": "$.ErrorInfo.Cause"
+              },
+              "End": true
+            }
+          }
+        }
+      RoleArn: !GetAtt  OrchestrationManagerSFNRole.Arn
+      StateMachineType: STANDARD
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+        - CloudWatchLogsLogGroup:
+            LogGroupArn: !GetAtt OrchestrationManagerSFNLogs.Arn
+      TracingConfiguration:
+        Enabled: true
+
+  OrchestrationManagerSFNRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${TenantName}${ApplicationName}OrchestrationManagerSFNRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: !Sub "${TenantName}${ApplicationName}DefaultRolePolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "logs"
+                Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                  - "logs:CreateLogDelivery"
+                  - "logs:GetLogDelivery"
+                  - "logs:UpdateLogDelivery"
+                  - "logs:DeleteLogDelivery"
+                  - "logs:ListLogDeliveries"
+                  - "logs:PutResourcePolicy"
+                  - "logs:DescribeResourcePolicies"
+                  - "logs:DescribeLogGroups"
+                Resource:
+                  - "*"
+              - Sid: "codepipeline"
+                Effect: Allow
+                Action:
+                - codepipeline:GetPipeline
+                - codepipeline:GetPipelineState
+                - codepipeline:StartPipelineExecution
+                Resource: "*"
+              - Sid: ssm
+                Effect: Allow
+                Action: 
+                - ssm:PutParameter
+                - ssm:Getparameter
+                - ssm:GetParameters
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/Shared/SAM/S3/Uri/${AppRemoName}*"
+              - Sid: sts
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref CrossAccountRoleArn
+
+  OrchestrationManagerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: !Sub 'Invoke ${TenantName}${ApplicationName}OrchestrationManager when Model Deploy Event arrives to event bus'
+      EventBusName: default
+      EventPattern:
+        detail-type:
+          - Model Deploy Event
+        source:
+          - !Sub '${AppRemoName}.ModelDeployEvent'   #MedInfoExtraction-p-v0bmqzy9yzp5.ModelDeployEvent
+        detail:
+          Lifecycle:
+            - !Ref ModelLifeCycle
+      Name: !Sub 'Invoke${TenantName}${ApplicationName}OrchestrationManager'
+      State: ENABLED
+      Targets:
+        - Id: !Sub '${TenantName}${ApplicationName}OrchestrationManager'
+          Arn: !GetAtt OrchestrationManagerSFN.Arn
+          RoleArn: !GetAtt OrchestrationManagerRuleRole.Arn
+
+  OrchestrationManagerRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${TenantName}${ApplicationName}OrchestrationManagerEventRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: eventrulepolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action:
+              - states:StartExecution
+              Resource: !GetAtt OrchestrationManagerSFN.Arn

@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template to create DocPreProcessor deploy build project and pipeline
+
+Parameters:
+  DevOpsRoleArn:
+    Type: String
+  CrossAccountRoleArn:
+    Type: String
+  TenantID:
+    Type: String
+  TenantName:
+    Type: String
+  TenantBucket:
+    Type: String
+  TenantBucketKMSKey:
+    Type: String
+  DocPreProcessorLifecycle:
+    Type: String
+    Default: Prod
+  ApplicationName:
+    Type: String
+  SecurityGroupSSM:
+    Type: String
+  PrivateSubnet1SSM:
+    Type: String
+  PrivateSubnet2SSM:
+    Type: String
+  SigningProfileNameML:
+    Type: String
+  SigningProfileVersionArnML:
+    Type: String
+    AllowedPattern: 'arn:aws:signer:(\w{2}-\w{4,9}-[1-4]):(\d{12}):\/signing-profiles\/([\w]+)\/([a-zA-Z0-9]{10})'
+  RepoNameWL:
+    Type: String
+  TextractLifeCycle:
+    Type: String
+    Default: Prod
+  ArtifactsBucketWL:
+    Type: String
+  KMSKeyArnWL:
+    Type: String
+  MLOpsProductsRepo:
+    Type: String
+  MLOpsProductsRepoBranch:
+    Type: String
+    Default: main
+  CADomain:
+    Type: String
+  CADomainOwner:
+    Type: String
+  CARepoDPP:
+    Type: String
+  StackTags:
+    Type: String
+    Description: Stack Level tags that need to be added in form of 'key1=value1 key2=value2'
+
+Resources:
+  DocPreProcessorDeployBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${TenantName}${ApplicationName}-DocPreProcessorDeploy'
+      ServiceRole: !Ref DevOpsRoleArn
+      Source:
+        BuildSpec: document_pre_processor/buildspec.deploy.yml
+        Location: !Sub https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${RepoNameWL}
+        Type: CODECOMMIT
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+        - Name: LIFECYCLE
+          Value: !Ref DocPreProcessorLifecycle
+          Type: PLAINTEXT
+        - Name: TENANT_NAME
+          Value: !Sub '${TenantName}${ApplicationName}'
+          Type: PLAINTEXT
+        - Name: CODEARTIFACT_ROLE_ARN
+          Value: !Ref CrossAccountRoleArn
+          Type: PLAINTEXT
+        - Name: SECURITY_GROUP
+          Value: !Ref SecurityGroupSSM
+          Type: PARAMETER_STORE
+        - Name: PRIVATE_SUBNET_1
+          Value: !Ref PrivateSubnet1SSM
+          Type: PARAMETER_STORE
+        - Name: PRIVATE_SUBNET_2
+          Value: !Ref PrivateSubnet2SSM
+          Type: PARAMETER_STORE
+        - Name: SIGNING_PROFILE_NAME
+          Type: PLAINTEXT
+          Value: !Ref SigningProfileNameML
+        - Name: SIGNING_PROFILE_VERSION_ARN
+          Type: PLAINTEXT
+          Value: !Ref SigningProfileVersionArnML
+        - Name: PACKAGING_S3_BUCKET
+          Type: PLAINTEXT
+          Value: !Ref ArtifactsBucketWL
+        - Name: TENANT_BUCKET
+          Value: !Ref TenantBucket
+          Type: PLAINTEXT
+        - Name: TENANT_BUCKET_KMS_KEY
+          Value: !Ref TenantBucketKMSKey
+          Type: PLAINTEXT
+        - Name: TEXTRACT_JOB_MANAGER_ARN_PARAM_NAME
+          Value: !Sub '/Shared/SAM/StateMachine/Arn/${TenantID}TextractJobManager${TextractLifeCycle}'
+          Type: PARAMETER_STORE
+        - Name: STACK_TAGS
+          Value: !Ref StackTags
+          Type: PLAINTEXT
+        - Name: DOMAIN
+          Value: !Ref CADomain
+          Type: PLAINTEXT
+        - Name: DOMAIN_OWNER
+          Value: !Ref CADomainOwner
+          Type: PLAINTEXT
+        - Name: ARTIFACT_REPO_NAME
+          Value: !Ref CARepoDPP
+          Type: PLAINTEXT
+        - Name: DISABLE_APP_METRICS
+          Value: true
+          Type: PLAINTEXT
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: false
+        Type: LINUX_CONTAINER
+      Artifacts:
+        Type: NO_ARTIFACTS
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      TimeoutInMinutes: 60
+
+  DocPreProcessorPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${TenantName}${ApplicationName}-DocPreProcessorDeploy'
+      ArtifactStore:
+        EncryptionKey:
+          Id: !Ref KMSKeyArnWL
+          Type: KMS
+        Location: !Ref ArtifactsBucketWL
+        Type: S3
+      RoleArn: !Ref DevOpsRoleArn
+      Stages:
+      - Name: Source
+        Actions:
+        - Name: Source
+          ActionTypeId:
+            Category: Source
+            Owner: AWS
+            Provider: CodeCommit
+            Version: '1'
+          RunOrder: 1
+          Configuration:
+            BranchName: !Ref MLOpsProductsRepoBranch
+            OutputArtifactFormat: CODE_ZIP
+            PollForSourceChanges: 'false'
+            RepositoryName: !Ref MLOpsProductsRepo
+          OutputArtifacts:
+          - Name: SourceArtifact
+          RoleArn: !Ref CrossAccountRoleArn
+          Namespace: SourceVariables
+      - Name: Build
+        Actions:
+        - Name: Build
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Provider: CodeBuild
+            Version: '1'
+          Configuration:
+            EnvironmentVariables: '[{"name":"CC_REPO_NAME","value":"#{SourceVariables.RepositoryName}","type":"PLAINTEXT"},
+                                    {"name":"CC_RESOLVED_SOURCE_VERSION","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"}]'
+            ProjectName: !Ref DocPreProcessorDeployBuild
+          InputArtifacts:
+          - Name: SourceArtifact
+          Namespace: BuildVariables
+          OutputArtifacts:
+          - Name: BuildArtifact
+          RunOrder: 1
+      PipelineType: V1

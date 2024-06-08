@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template to create application deploy build project and pipeline
+
+Parameters:
+  DevOpsRoleArn:
+    Type: String
+  CrossAccountRoleArn:
+    Type: String
+  AppRemoName:
+   Type: String
+  AppRepoBranch:
+    Type: String
+  SigningProfileNameML:
+    Type: String
+  SigningProfileVersionArnML:
+    Type: String
+    AllowedPattern: 'arn:aws:signer:(\w{2}-\w{4,9}-[1-4]):(\d{12}):\/signing-profiles\/([\w]+)\/([a-zA-Z0-9]{10})'
+  RepoNameWL:
+    Type: String
+  ArtifactsBucketWL:
+    Type: String
+  KMSKeyArnWL:
+    Type: String
+  TenantID:
+    Type: String
+  ApplicationName:
+    Type: String
+  TenantName:
+    Type: String
+  LifeCycle:
+    Type: String
+  TextractLifeCycle:
+    Type: String
+    Default: Prod
+  TenantBucket:
+    Type: String
+  TenantBucketKMSKey:
+    Type: String
+  CARepoApp:
+    Type: String
+  CADomain:
+    Type: String
+  CADomainOwner:
+    Type: String
+  SecurityGroupSSM:
+    Type: String
+  PrivateSubnet1SSM:
+    Type: String
+  PrivateSubnet2SSM:
+    Type: String
+  MLOpsProductsRepo:
+    Type: String
+  StackTags:
+    Type: String
+    Description: Stack Level tags that need to be added in form of 'key1=value1 key2=value2'
+
+Resources:
+  ApplicationDeployBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${TenantName}${ApplicationName}-ApplicationDeploy'
+      ServiceRole: !Ref DevOpsRoleArn
+      Source:
+        BuildSpec: buildspec.application.deploy.yml
+        Location: !Sub https://git-codecommit.${AWS::Region}.amazonaws.com/v1/repos/${RepoNameWL}
+        Type: CODECOMMIT
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+        - Name: LIFECYCLE
+          Value: !Ref LifeCycle
+          Type: PLAINTEXT
+        - Name: PACKAGING_S3_BUCKET
+          Type: PLAINTEXT
+          Value: !Ref ArtifactsBucketWL
+        - Name: SIGNING_PROFILE_VERSION_ARN
+          Type: PLAINTEXT
+          Value: !Ref SigningProfileVersionArnML
+        - Name: SIGNING_PROFILE_NAME
+          Type: PLAINTEXT
+          Value: !Ref SigningProfileNameML
+        - Name: CODEARTIFACT_ROLE_ARN
+          Type: PLAINTEXT
+          Value: !Ref CrossAccountRoleArn
+        - Name: ARTIFACT_REPO_NAME
+          Value: !Ref CARepoApp
+          Type: PLAINTEXT
+        - Name: DOMAIN
+          Value: !Ref CADomain
+          Type: PLAINTEXT
+        - Name: DOMAIN_OWNER
+          Value: !Ref CADomainOwner
+          Type: PLAINTEXT
+        - Name: SECURITY_GROUP
+          Value: !Ref SecurityGroupSSM
+          Type: PARAMETER_STORE
+        - Name: PRIVATE_SUBNET_1
+          Value: !Ref PrivateSubnet1SSM
+          Type: PARAMETER_STORE
+        - Name: PRIVATE_SUBNET_2
+          Value: !Ref PrivateSubnet2SSM
+          Type: PARAMETER_STORE
+        - Name: STACK_TAGS
+          Value: !Ref StackTags
+          Type: PLAINTEXT
+        - Name: TENANT_BUCKET
+          Value: !Ref TenantBucket
+          Type: PLAINTEXT
+        - Name: TENANT_BUCKET_KMS_KEY
+          Value: !Ref TenantBucketKMSKey
+          Type: PLAINTEXT
+        - Name: TEXTRACT_SFN_ARN
+          Value: !Sub "/Shared/SAM/StateMachine/Arn/${TenantID}TextractJobManager${TextractLifeCycle}"
+          Type: PARAMETER_STORE
+        - Name: MLOPS_REPO_NAME
+          Value: !Ref MLOpsProductsRepo
+          Type: PLAINTEXT
+        - Name: TENANT_ID
+          Value: !Ref TenantID
+          Type: PLAINTEXT
+        - Name: DISABLE_APP_METRICS
+          Value: true
+          Type: PLAINTEXT
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: false
+        Type: LINUX_CONTAINER
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      TimeoutInMinutes: 60
+
+  ApplicationDeployPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${TenantName}${ApplicationName}-ApplicationDeploy'
+      RoleArn: !Ref DevOpsRoleArn
+      ArtifactStore:
+        EncryptionKey:
+          Id: !Ref KMSKeyArnWL
+          Type: KMS
+        Location: !Ref ArtifactsBucketWL
+        Type: S3
+      Stages:
+        - Name: Source
+          Actions:
+          - Name: Source
+            ActionTypeId:
+              Category: Source
+              Owner: AWS
+              Provider: CodeCommit
+              Version: '1'
+            RunOrder: 1
+            Configuration:
+              BranchName: !Ref AppRepoBranch
+              OutputArtifactFormat: CODE_ZIP
+              PollForSourceChanges: 'false'
+              RepositoryName: !Ref AppRemoName
+            OutputArtifacts:
+            - Name: SourceArtifact
+            RoleArn: !Ref CrossAccountRoleArn
+            Namespace: SourceVariables
+        - Name: Build
+          Actions:
+          - Name: Build
+            ActionTypeId:
+              Category: Build
+              Owner: AWS
+              Provider: CodeBuild
+              Version: '1'
+            RunOrder: 1
+            Configuration:
+              EnvironmentVariables: '[{"name":"CC_REPO_NAME","value":"#{SourceVariables.RepositoryName}","type":"PLAINTEXT"},
+                                    {"name":"CC_RESOLVED_SOURCE_VERSION","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"}]'
+              ProjectName: !Ref ApplicationDeployBuild
+            InputArtifacts:
+            - Name: SourceArtifact
+            OutputArtifacts:
+            - Name: BuildArtifact
+      PipelineType: V2
+
+Outputs:
+  AppPipelineName:
+    Description: Name of App pipeline
+    Value: !Ref ApplicationDeployPipeline
+  
