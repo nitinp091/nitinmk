@@ -86,3 +86,4 @@ Traceback (most recent call last):
 json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 2 column 5 (char 6)
 
 json.decoder.JSONDecodeError: Expecting ',' delimiter: line 3 column 6 (char 57)
+botocore.exceptions.ClientError: An error occurred (ValidationError) when calling the CreateStack operation: Parameters: [StackTags] must have values
