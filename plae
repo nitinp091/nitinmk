@@ -158,3 +158,58 @@ def main():
 
 if __name__ == '__main__':
     main()
+import os
+import boto3
+from botocore.config import Config
+import urllib3
+
+http = urllib3.PoolManager()
+config = Config(signature_version='s3v4')
+s3_client = boto3.client('s3', config=config)
+
+def source_bucket_url(source_bucket, object_key):
+    response = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                "Bucket":source_bucket,
+                "Key":object_key
+            },
+            ExpiresIn=300
+        )
+    return response
+
+def download_object(source_bucket, object_key):
+    file_name = '/tmp/' + object_key
+    s3_client.download_file(source_bucket, object_key, file_name)
+    with open(file_name, 'rb') as f:
+        file = f.read()
+    return file_name, file
+
+def destination_bucket_url(destination_bucket, object_key):
+    response = s3_client.generate_presigned_post(
+            destination_bucket,
+            object_key,
+            ExpiresIn=300
+        )
+    return response
+    
+def upload_object(object_key, url, file):
+    r = http.request(
+            "PUT",
+            url,
+            body=file
+        )
+    return r.status
+
+def lambda_handler(event, context):
+    
+    source_bucket = "cloudformationartifacts1432"
+    destination_bucket = "adityabucket-test"
+    object_key = "layout.csv"
+    
+    destination_url = destination_bucket_url(destination_bucket, object_key)
+#    source_url = source_bucket_url(source_bucket, object_key)
+    url = destination_bucket_url(destination_bucket, object_key)["url"]
+#    data = destination_bucket_url(destination_bucket, object_key)["fields"]
+    file_name, file =  download_object(source_bucket, object_key)
+    return upload_object(object_key, url, file)
