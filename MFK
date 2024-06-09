@@ -14,3 +14,101 @@ def lambda_handler(event, context):
     object_key = 'month.csv'    
     presigned_url = generate_presigned_url(bucket_name, object_key)
     return {'presigned_url': presigned_url}
+
+import boto3
+import urllib3
+from botocore.config import Config
+import uuid
+
+http = urllib3.PoolManager()
+config = Config(signature_version='s3v4')
+s3_client = boto3.client('s3', config=config)
+
+def generate_presigned_url(bucket_name, object_key):
+    url = s3_client.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': bucket_name, 'Key': object_key},
+        ExpiresIn=3600  # URL will be valid for 1 hour
+    )
+    return url
+
+def download_object(bucket_name, object_key):
+    file_name = '/tmp/' + str(uuid.uuid4())  # Unique file name using UUID
+    s3_client.download_file(bucket_name, object_key, file_name)
+    return file_name
+
+def generate_presigned_post(bucket_name, object_key):
+    response = s3_client.generate_presigned_post(
+        Bucket=bucket_name,
+        Key=object_key,
+        ExpiresIn=3600  # URL will be valid for 1 hour
+    )
+    return response
+
+def upload_object(url, file_name):
+    with open(file_name, 'rb') as f:
+        file_content = f.read()
+    r = http.request("PUT", url, body=file_content)
+    return r.status
+
+def lambda_handler(event, context):
+    source_bucket_name = 'source_bucket_name'
+    destination_bucket_name = 'destination_bucket_name'
+    object_key = 'object_key'
+
+    source_presigned_url = generate_presigned_url(source_bucket_name, object_key)
+    file_name = download_object(source_bucket_name, object_key)
+    destination_presigned_url = generate_presigned_post(destination_bucket_name, object_key)
+    upload_status = upload_object(destination_presigned_url['url'], file_name)
+    
+    return upload_status
+
+
+import boto3
+import urllib3
+from botocore.config import Config
+import uuid
+
+http = urllib3.PoolManager()
+config = Config(signature_version='s3v4')
+s3_client = boto3.client('s3', config=config)
+
+def generate_presigned_url(bucket_name, object_key):
+    url = s3_client.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': bucket_name, 'Key': object_key},
+        ExpiresIn=3600  # URL will be valid for 1 hour
+    )
+    return url
+
+def download_object(bucket_name, object_key):
+    file_name = '/tmp/' + str(uuid.uuid4())  # Unique file name using UUID
+    s3_client.download_file(bucket_name, object_key, file_name)
+    return file_name
+
+def generate_presigned_post(bucket_name, object_key):
+    response = s3_client.generate_presigned_post(
+        Bucket=bucket_name,
+        Key=object_key,
+        ExpiresIn=3600  # URL will be valid for 1 hour
+    )
+    return response
+
+def upload_object(url, file_name):
+    with open(file_name, 'rb') as f:
+        file_content = f.read()
+    r = http.request("PUT", url, body=file_content)
+    return r.status
+
+def lambda_handler(event, context):
+    source_bucket_name = 'source_bucket_name'
+    destination_bucket_name = 'destination_bucket_name'
+    object_key = 'object_key'
+
+    source_presigned_url = generate_presigned_url(source_bucket_name, object_key)
+    file_name = download_object(source_bucket_name, object_key)
+    destination_presigned_url = generate_presigned_post(destination_bucket_name, object_key)
+    upload_status = upload_object(destination_presigned_url['url'], file_name)
+    
+    return upload_status
+
