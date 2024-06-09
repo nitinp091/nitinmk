@@ -1,0 +1,66 @@
+import boto3
+import json
+import sys
+
+def read_json(file_path):
+    with open(file_path, 'r') as file:
+        return json.load(file)
+
+def get_aws_region(args):
+    if '--AWSRegion' in args:
+        idx = args.index('--AWSRegion')
+        if idx + 1 < len(args):
+            return args[idx + 1]
+    return None
+
+def parse_stack_tags(tags_str):
+    return [{'Key': kv.split('=')[0], 'Value': kv.split('=')[1]} for kv in tags_str.split(',')]
+
+def aws_cfn_deploy(region, template_file, stack_name, parameters, tags, role_arn=None):
+    client = boto3.client('cloudformation', region_name=region)
+    parameters_list = [{'ParameterKey': k, 'ParameterValue': v} for k, v in parameters.items()]
+    
+    deploy_args = {
+        'StackName': stack_name,
+        'TemplateBody': open(template_file, 'r').read(),
+        'Parameters': parameters_list,
+        'Capabilities': ['CAPABILITY_NAMED_IAM'],
+        'Tags': tags
+    }
+    
+    if role_arn:
+        deploy_args['RoleARN'] = role_arn
+
+    response = client.create_stack(**deploy_args)
+    print(response)
+
+def main():
+    args = sys.argv[1:]
+    aws_region = get_aws_region(args)
+
+    if not aws_region:
+        print("AWS Region not provided. Use --AWSRegion to specify the region.")
+        return
+
+    role_arn = input("Please enter if you would like to use RoleArn to Launch stack, No/RoleArn: ")
+
+    # Load parameters from JSON
+    params = read_json('parameters.json')
+
+    stack_tags = parse_stack_tags(params['StackTags'])
+
+    # Deploy stack
+    aws_cfn_deploy(
+        aws_region,
+        'your_template.yaml',  # Make sure your template file name is correct
+        params['TopicName'],  # Use TopicName as the stack name
+        {
+            'EmailAddress': params['EmailAddress'],
+            'TopicName': params['TopicName']
+        },
+        stack_tags,
+        None if role_arn == 'No' else role_arn
+    )
+
+if __name__ == '__main__':
+    main()
