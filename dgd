@@ -15,3 +15,15 @@ Outputs:
   TopicName: 
     Description: The name of the created SNS topic
     Value: !Ref TopicName
+
+{
+    {
+        "EmailAddress": "Nitin.Patil@exlservice.com"
+    },
+    {
+        "Stacktags": "tag1=value1 tag2=value2"
+    },
+    {
+        "TopicName": "NitinTestTopic"
+    }
+}
