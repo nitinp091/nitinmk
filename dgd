@@ -1,0 +1,17 @@
+Resources:
+  MySNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Ref TopicName
+      Subscription:
+        - Endpoint: !Ref EmailAddress
+          Protocol: email
+
+Outputs:
+  TopicArn:
+    Description: The ARN of the created SNS topic
+    Value: !Ref MySNSTopic
+
+  TopicName: 
+    Description: The name of the created SNS topic
+    Value: !Ref TopicName
