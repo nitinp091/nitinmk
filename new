@@ -1,0 +1,22 @@
+import boto3
+
+def lambda_handler(event, context):
+    source_bucket = 'objecturlcreationnitin'
+    destination_bucket = 'nitintest1'
+    object_key = 'Skills.pdf'
+    region = 'us-east-1'
+
+    s3_client = boto3.client('s3', region_name=region)
+
+    source_object_url = s3_client.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': source_bucket, 'Key': object_key},
+        ExpiresIn=3600
+    )
+
+    response = s3_client.get_object(Bucket=source_bucket, Key=object_key)
+    object_content = response['Body'].read()
+
+    # Copy the object
+    s3_client.put_object(Bucket=destination_bucket, Key=object_key, Body=object_content)
+    print(f"Object {object_key} copied from {source_bucket} to {destination_bucket}")
