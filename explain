@@ -49,4 +49,48 @@ Process Substitution: Bash can substitute the output of a command directly into 
 Alternatives in Python:
 For command execution and capturing output, Python's subprocess module is used.
 Complex shell-specific operations can often be handled by combining multiple Python libraries.
-Overall, Python offers more powerful and structured handling of complex tasks and data manipulation, while Bash excels at straightforward scripting and direct command execution.
+Overall, Python offers more powerful and structured handling of complex tasks and data manipulation, while Bash excels at straightforward scripting and direct comm.and execution.
+
+
+
+import boto3
+import urllib3
+from botocore.config import Config
+import uuid
+
+http = urllib3.PoolManager()
+config = Config(signature_version='s3v4')
+s3_client = boto3.client('s3', config=config)
+
+def generate_presigned_url(bucket_name, object_key):
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': object_key},
+            ExpiresIn=3600
+        )
+        return url
+    except Exception as e:
+        print(f"Error generating presigned URL: {e}")
+        return None
+
+# Other functions remain unchanged
+
+def lambda_handler(event, context):
+    try:
+        source_bucket_name = 'source_bucket_name'
+        destination_bucket_name = 'destination_bucket_name'
+        object_key = 'object_key'
+
+        source_presigned_url = generate_presigned_url(source_bucket_name, object_key)
+        if not source_presigned_url:
+            return "Error generating source presigned URL"
+
+        # Rest of your code
+
+        return upload_status
+    except Exception as e:
+        print(f"Error in Lambda function: {e}")
+        raise  # Rethrow the exception for better visibility in logs
+
+# Set a reasonable timeout for your function
