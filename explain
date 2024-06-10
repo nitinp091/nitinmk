@@ -124,3 +124,26 @@ def lambda_handler(event, context):
     except Exception as e:
         logger.error("Error copying the file to the destination bucket")
         print('Error Message: {}'.format(str(e)))
+
+
+Certainly! Let’s incorporate pre-signed URLs into the process. Pre-signed URLs allow you to grant temporary access to specific S3 objects without requiring the user to authenticate with AWS. Here’s how you can achieve this:
+
+Create the Source and Destination Buckets:
+If you haven’t already, create two S3 buckets: one for the source and another for the destination.
+You can do this through the Amazon S3 console by choosing “Create bucket” and specifying the bucket names and regions.
+Write the Lambda Function:
+Open the AWS Lambda console and create a new function.
+Choose Python 3.11 as the runtime.
+In the code section, paste the following Python cod
+
+Replace os.environ['destination_bucket'] with the actual destination bucket name.
+Create an S3 Trigger for the Lambda Function:
+In the Lambda console, add an S3 trigger to your function.
+Specify the source bucket and choose “All object create events” as the event type.
+Now, whenever a new object is created in the source bucket, the Lambda function will generate a pre-signed URL for that object and use it to copy the object to the destination bucket. Remember to adjust the code and permissions according to your specific use case. Happy coding! 😊🚀
+
+Let me know if you need further assistance or have any questions!
+
+
+
+
